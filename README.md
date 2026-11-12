@@ -22,20 +22,68 @@ Personal use only.
 
 ## Project layout
 
-    main.py             entry point
-    app.py              main window
-    editor.py           edit model + clip streamer
-    processing.py       output chain + ffmpeg I/O
-    share.py            send-to-phone server
-    store.py            disk-backed audio + peak pyramid
-    theme.py            dark theme
-    audio_backends/     device discovery + recorder
-    core/               pieces of the main window
-    waveform/           waveform widget
-    assets/             thumbnail, test audio
-    exports/            exported clips (configurable in-app)
-    finals/             finished clips (configurable in-app)
-    session/            scratch recordings (auto-cleaned)
+```
+SpotClip/
+├── main.py                  entry point
+├── app.py                   MainWindow: state + wiring only
+├── config.py                paths and constants (exports/, finals/, session/ live beside main.py)
+├── utils.py                 reveal_folder, mbytes, clean_orphan_sessions
+├── theme.py                 dark theme and colours
+├── processing.py            loudness guard + ffmpeg decode / encode
+├── store.py                 disk-backed audio + peak pyramid
+├── share.py                 send-a-folder-to-phone HTTP server + dialogs
+├── requirements.txt
+├── README.md
+│
+├── editor/                  the edit model (no GUI)
+│   ├── __init__.py
+│   ├── timeline.py          Keep, Piece, Timeline (cuts, undo, per-piece fades)
+│   ├── streamer.py          ClipStreamer (renders the clip block by block)
+│   ├── fades.py             all fade gain math
+│   └── timefmt.py           format_time, parse_time
+│
+├── audio_backends/          capture and playback
+│   ├── __init__.py
+│   ├── devices.py           device discovery
+│   ├── recorder.py          capture thread -> disk
+│   ├── glitches.py          dropout counter
+│   └── player.py            StreamPlayer (queue-buffered output)
+│
+├── waveform/                waveform widget
+│   ├── __init__.py
+│   ├── view.py              state, navigation, input
+│   └── painter.py           all drawing
+│
+├── ui/                      widget construction only
+│   ├── __init__.py
+│   ├── actions.py           QActions and shortcuts
+│   ├── menus.py             menu bar
+│   ├── panels.py            top row, waveform + pieces panel, nav row, edit group
+│   ├── output_panel.py      fades / loudness / export controls
+│   ├── widgets.py           sep(), abtn()
+│   ├── dialogs.py           Busy, Source, Join, Help, PieceFade dialogs
+│   └── help_text.py         HELP_HTML
+│
+├── controllers/             MainWindow behaviour, one mixin per concern
+│   ├── __init__.py
+│   ├── source.py            capture source selection
+│   ├── recording.py         record / pause / resume / stop / abort
+│   ├── fileio.py            load / append / join, session files
+│   ├── export.py            output chain, export, finalize
+│   ├── folders.py           export / finals folders, send to phone
+│   ├── cover.py             cover art
+│   ├── editing.py           delete / restore / undo / trim / piece fades
+│   ├── transport.py         play / pause / seek / raw / test tone
+│   ├── navigation.py        scrollbar, go-to, pieces list
+│   ├── bookmarks.py         bookmarks (also while recording)
+│   ├── status.py            action enabling, status bar, tick loop
+│   └── tasks.py             TaskThread for background work
+│
+├── assets/                  thumbnail, test audio
+├── exports/                 exported clips (configurable in-app)
+├── finals/                  finished clips (configurable in-app)
+└── session/                 scratch recordings (auto-cleaned)
+```
 
 ## What each script does
 

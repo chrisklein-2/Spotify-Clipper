@@ -25,7 +25,7 @@ class OutputPanelMixin:
         self.cut_fade.valueChanged.connect(self.on_fade_changed)
         self.fade_out = QDoubleSpinBox()
         self.fade_out.setRange(0.0, 60.0)
-        self.fade_out.setValue(1.0)
+        self.fade_out.setValue(0.0)
         self.fade_out.setSuffix(" s")
         self.fade_out.setMinimumWidth(80)
         self.fade_out.setToolTip("Extra long fade on the very end of the clip.")

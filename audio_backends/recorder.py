@@ -18,6 +18,7 @@ except Exception:
 from .devices import DEFAULT_SR
 
 LIVE_SECONDS = 10.0
+ENV_BUCKET = 1024            # frames per min/max bucket of the whole-recording overview
 
 # ── glitch counter ──────────────────────────────────────────────
 _glitches = 0
@@ -79,6 +80,11 @@ class Recorder:
         self._ring_pos = 0
         self._ring_full = False
         self.paused = False
+        self.env_bucket = ENV_BUCKET
+        self._env_lock = threading.Lock()
+        self._env_min = np.zeros(0, dtype=np.float32)
+        self._env_max = np.zeros(0, dtype=np.float32)
+        self._env_tail = np.zeros(0, dtype=np.float32)
 
     def start(self):
         os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
@@ -181,14 +187,32 @@ class Recorder:
         peak = float(np.abs(block).max())
         if peak > self._peak:
             self._peak = peak
-        self._push_ring(block[:, 0] if self.channels == 1 else block.mean(axis=1))
+        mono = block[:, 0] if self.channels == 1 else block.mean(axis=1)
+        self._push_ring(mono)
+        self._push_env(mono)
         pcm = (np.clip(block, -1.0, 1.0) * 32767.0).astype(np.int16)
         try:
             self._queue.put_nowait(pcm)
             self._frames += len(pcm)
         except queue.Full:
             self._error = "disk cannot keep up with the recording"
+    
+    def _push_env(self, mono):
+        """Fold samples into the running min/max overview of the whole take."""
+        with self._env_lock:
+            data = np.concatenate([self._env_tail, mono]) if len(self._env_tail) else mono
+            n = len(data) // ENV_BUCKET
+            if n:
+                view = data[:n * ENV_BUCKET].reshape(n, ENV_BUCKET)
+                self._env_min = np.concatenate([self._env_min, view.min(axis=1)])
+                self._env_max = np.concatenate([self._env_max, view.max(axis=1)])
+            self._env_tail = np.array(data[n * ENV_BUCKET:], dtype=np.float32)
 
+    def envelope(self):
+        """(mins, maxs) of everything recorded so far, one pair per bucket."""
+        with self._env_lock:
+            return self._env_min, self._env_max
+        
     def _push_ring(self, mono):
         size = len(self._ring)
         n = len(mono)

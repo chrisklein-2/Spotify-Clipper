@@ -81,3 +81,15 @@ class NavigationMixin:
     def on_end_fade_changed(self, value):
         self.wave.set_end_fade(value)
         self.invalidate()
+
+    def on_block_selected(self, index):
+        """Double-click on the waveform: open the pieces tab, highlight it."""
+        if index >= 0:
+            self.act_pieces.setChecked(True)      # opens the panel
+            self.seg_list.setCurrentRow(index)
+            item = self.seg_list.item(index)
+            if item is not None:
+                self.seg_list.scrollToItem(item)
+        else:
+            self.seg_list.clearSelection()        # a deleted gap has no row
+        self.update_actions()

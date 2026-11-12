@@ -10,14 +10,17 @@ import numpy as np
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QPolygonF
 
-from editor.fades import cap_fades
 from editor import format_time
+from editor.fades import cap_fades
 from theme import (COL_BG, COL_DEL_BG, COL_FADE, COL_MARK, COL_PLAYHEAD,
                    COL_RULER, COL_RULER_LINE, COL_SEL, COL_SEL_EDGE, COL_TEXT,
                    COL_TEXT_BRIGHT, COL_WAVE_DEL, COL_WAVE_KEEP,
                    COL_WAVE_KEEP_SOFT)
 
 RULER_H = 22
+MIN_WEDGE_PX = 4.0           # narrowest a fade is drawn, so it shows fully zoomed out
+FILL_MIN_PX = 14.0           # narrower than this, the translucent fill is dropped
+FULL_WEDGE_PX = 24.0         # this wide or wider, the lines are full thickness
 NICE_STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600,
               1800, 3600]
 
@@ -45,6 +48,16 @@ def live_peaks(mono, width):
             mins[i], maxs[i] = chunk.min(), chunk.max()
     return mins, maxs
 
+# Per-pixel min/max from a bucket overview (the whole-recording live view).
+def env_peaks(mins, maxs, width):
+    n = len(mins)
+    if width < 1 or n < 1:
+        return None
+    if n <= width:
+        idx = (np.arange(width) * n / float(width)).astype(np.int64)
+        return mins[idx], maxs[idx]
+    starts = np.linspace(0, n, width + 1).astype(np.int64)[:-1]
+    return np.minimum.reduceat(mins, starts), np.maximum.reduceat(maxs, starts)
 
 # Boolean mask: which pixel columns are inside kept audio.
 def keep_mask(view, width):
@@ -101,10 +114,9 @@ def paint(view, p):
         p.drawLine(int(view.t2x(a)), int(mid), int(view.t2x(b)), int(mid))
 
     _paint_fades(view, p, mid, scale)
-    _paint_end_fade(view, p, mid, scale)
     _paint_selection(view, p, bt, h)
     _paint_ruler(view, p, w)
-    _paint_bookmarks(view, p) 
+    _paint_bookmarks(view, p)
     px = view.t2x(view.playhead)
     p.setPen(QPen(COL_PLAYHEAD, 1))
     p.drawLine(int(px), 0, int(px), h)
@@ -149,7 +161,34 @@ def _paint_flag(view, p, x, bt, label, right):
                Qt.AlignCenter, label)
 
 
-# Draw the fade in / fade out ramp at each kept piece edge.
+# One wedge: the part of the waveform body that the gain ramp takes away,
+# between x=xa (gain ga) and x=xb (gain gb), both 0..1. The line gets thinner
+# as the wedge shrinks, and the translucent fill disappears below FILL_MIN_PX.
+def _lost_area(p, xa, ga, xb, gb, mid, top, bot):
+    size = abs(xb - xa)
+    k = min(1.0, max(0.0, (size - MIN_WEDGE_PX) / (FULL_WEDGE_PX - MIN_WEDGE_PX)))
+    pen_w = 1.0 + k
+    fill = None
+    if size >= FILL_MIN_PX:
+        fill = QColor(COL_FADE)
+        fill.setAlpha(50)
+    for edge in (top, bot):
+        ya = mid + (edge - mid) * ga
+        yb = mid + (edge - mid) * gb
+        if fill is not None:
+            poly = QPolygonF([QPointF(xa, ya), QPointF(xa, edge),
+                              QPointF(xb, edge), QPointF(xb, yb)])
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(fill))
+            p.drawPolygon(poly)
+            p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(COL_FADE, pen_w))
+        p.drawLine(QPointF(xa, ya), QPointF(xb, yb))
+
+
+# Draw the fade in / fade out of every kept piece, plus the end fade.
+# The last piece shows ONE out-wedge: whichever of its own fade and the
+# end fade is longer, because that is what the audio does.
 def _paint_fades(view, p, mid, scale):
     tl = view.timeline
     if not tl or not tl.keeps or view.span() <= 0:
@@ -159,42 +198,46 @@ def _paint_fades(view, p, mid, scale):
     top, bot = mid - scale, mid + scale
     keeps = tl.keeps
     last = len(keeps) - 1
-    end_s = min(view.end_fade_s, tl.kept_duration())
-    p.setPen(QPen(COL_FADE, 2))
+    end_s = min(getattr(view, "end_fade_s", 0.0), tl.kept_duration())
 
     end_wins = False
     for i, keep in enumerate(keeps):
         x1, x2 = view.t2x(keep.start), view.t2x(keep.end)
-        fin = default if keep.fade_in is None else keep.fade_in
-        fout = default if keep.fade_out is None else keep.fade_out
+        fin, fout = tl.effective_fades(keep, default)
         fin, fout = cap_fades(fin, fout, keep.length())
         if i == last and end_s > fout:
-            end_wins = True            # the end fade replaces this wedge
+            end_wins = True
             fout = 0.0
         if x2 < -20 or x1 > view.width() + 20:
             continue
-        fi_px, fo_px = fin * px_per_s, fout * px_per_s
-        if fi_px >= 1.5:
-            p.drawLine(int(x1), int(mid), int(x1 + fi_px), int(top))
-            p.drawLine(int(x1), int(mid), int(x1 + fi_px), int(bot))
-        if fo_px >= 1.5:
-            p.drawLine(int(x2 - fo_px), int(top), int(x2), int(mid))
-            p.drawLine(int(x2 - fo_px), int(bot), int(x2), int(mid))
+        half = (x2 - x1) / 2.0
+        if fin > 0:
+            f = min(max(fin * px_per_s, MIN_WEDGE_PX), half)
+            if f >= 1.0:
+                _lost_area(p, x1, 0.0, x1 + f, 1.0, mid, top, bot)
+        if fout > 0:
+            f = min(max(fout * px_per_s, MIN_WEDGE_PX), half)
+            if f >= 1.0:
+                _lost_area(p, x2 - f, 1.0, x2, 0.0, mid, top, bot)
 
-    if end_wins:
-        acc = 0.0                       # output seconds already covered
-        for keep in reversed(keeps):
-            if acc >= end_s:
-                break
-            use = min(end_s - acc, keep.length())
-            g_end, g_start = acc / end_s, (acc + use) / end_s
-            xe, xs = view.t2x(keep.end), view.t2x(keep.end - use)
-            for edge in (top, bot):
-                p.drawLine(int(xs), int(mid + (edge - mid) * g_start),
-                           int(xe), int(mid + (edge - mid) * g_end))
-            acc += use
-
-
+    if not end_wins or end_s <= 0:
+        return
+    if end_s * px_per_s < MIN_WEDGE_PX:
+        xe = view.t2x(keeps[-1].end)
+        width = xe - view.t2x(keeps[-1].start)
+        xs = xe - min(MIN_WEDGE_PX, max(1.0, width))
+        _lost_area(p, xs, 1.0, xe, 0.0, mid, top, bot)
+        return
+    acc = 0.0                            # output seconds already covered
+    for keep in reversed(keeps):
+        if acc >= end_s:
+            break
+        use = min(end_s - acc, keep.length())
+        g_end, g_start = acc / end_s, (acc + use) / end_s
+        xe, xs = view.t2x(keep.end), view.t2x(keep.end - use)
+        _lost_area(p, xs, g_start, xe, g_end, mid, top, bot)
+        acc += use
+        
 # Draw ruler tick marks and time labels.
 def _paint_ruler(view, p, w):
     step = pick_tick_step(view.span(), w)
@@ -211,19 +254,33 @@ def _paint_ruler(view, p, w):
         t += step
 
 
-# Draw the rolling live buffer while recording.
+# Draw the live view while recording, with bookmark markers.
 def _paint_live(view, p, w, bt, bh, mid):
-    peaks = live_peaks(view.live_mono, w)
+    if view.live_env is not None:
+        peaks = env_peaks(view.live_env[0], view.live_env[1], w)
+    else:
+        peaks = live_peaks(view.live_mono, w)
     if peaks is not None:
         mins, maxs = peaks
         scale = bh / 2.0 - 6
         p.setPen(QPen(QColor("#e05c5c"), 1))
         for x in range(w):
             p.drawLine(x, int(mid - maxs[x] * scale), x, int(mid - mins[x] * scale))
+    if view.live_marks:
+        r = 3
+        y_dot = RULER_H - r - 2
+        p.setPen(QPen(COL_MARK, 1))
+        p.setBrush(QBrush(COL_MARK))
+        for frac in view.live_marks:
+            x = int(frac * w)
+            p.drawEllipse(x - r, y_dot - r, r * 2, r * 2)
+            p.drawLine(x, RULER_H, x, view.height())
+        p.setBrush(Qt.NoBrush)
     p.setPen(COL_TEXT_BRIGHT)
     p.drawText(10, RULER_H - 7, view.live_label)
 
-    # Small yellow dots on the ruler for bookmarked spots.
+
+# Small yellow dots on the ruler for bookmarked spots.
 def _paint_bookmarks(view, p):
     if not view.bookmarks:
         return
@@ -236,21 +293,4 @@ def _paint_bookmarks(view, p):
         if -r <= x <= view.width() + r:
             p.drawEllipse(x - r, y_dot - r, r * 2, r * 2)
             p.drawLine(x, RULER_H, x, RULER_H + 8)
-
-def _paint_end_fade(view, p, mid, scale):
-    if view.end_fade_s <= 0 or not view.timeline or not view.timeline.keeps:
-        return
-    fade = min(view.end_fade_s, view.timeline.kept_duration())
-    top, bot = mid - scale, mid + scale
-    p.setPen(QPen(COL_FADE, 2, Qt.DashLine))
-    acc = 0.0                                    # output seconds already covered
-    for keep in reversed(view.timeline.keeps):
-        if acc >= fade:
-            break
-        use = min(fade - acc, keep.length())
-        g_end, g_start = acc / fade, (acc + use) / fade
-        x_end, x_start = view.t2x(keep.end), view.t2x(keep.end - use)
-        for edge in (top, bot):
-            p.drawLine(int(x_start), int(mid + (edge - mid) * g_start),
-                       int(x_end), int(mid + (edge - mid) * g_end))
-        acc += use
+    p.setBrush(Qt.NoBrush)

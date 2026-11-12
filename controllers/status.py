@@ -1,4 +1,6 @@
-"""core/status.py - StatusMixin: action enabling, status bar, tick loop."""
+"""controllers/status.py - StatusMixin: action enabling, status bar, tick loop."""
+
+
 import numpy as np
 from PySide6.QtWidgets import QMessageBox
 
@@ -12,6 +14,7 @@ SEP = "   \u2502   "
 class StatusMixin:
 
     def update_actions(self):
+        recording = self.recorder is not None
         has = self.timeline.duration() > 0
         sel = self.wave.selection() is not None
         has_marks = bool(self.bookmarks)
@@ -21,7 +24,9 @@ class StatusMixin:
         self.act_zoomsel.setEnabled(has and sel)
         self.act_undo.setEnabled(self.timeline.can_undo())
         self.act_redo.setEnabled(self.timeline.can_redo())
-        self.act_bookmark.setEnabled(has or self.recorder is not None)
+        self.act_bookmark.setEnabled(has or recording)
+        self.mark_btn.setEnabled(recording)
+        self.live_zoom_btn.setEnabled(recording)
         self.act_rm_bookmark.setEnabled(has and has_marks)
         self.act_clear_bookmarks.setEnabled(has_marks)
         self.act_prev_bookmark.setEnabled(has and has_marks)
@@ -30,7 +35,7 @@ class StatusMixin:
         for action in (
             self.act_mark_in, self.act_mark_out, self.act_trim, self.act_reset,
             self.act_fit, self.act_selall, self.act_play, self.act_from_start,
-            self.act_export, self.act_finalize, self.act_piece_fades
+            self.act_export, self.act_finalize, self.act_piece_fades,
         ):
             action.setEnabled(has)
         for widget in (
@@ -74,6 +79,15 @@ class StatusMixin:
         else:
             self._tick_playback()
 
+    # Bookmark positions (0..1 across the live window) still inside the
+    # rolling buffer that is being drawn.
+    def _live_marks(self, mono, elapsed):
+        span = len(mono) / float(self.recorder.samplerate)
+        if span <= 0:
+            return []
+        return [1.0 - (elapsed - t) / span
+                for t in self.bookmarks if 0.0 <= elapsed - t <= span]
+
     def _tick_recording(self):
         error = self.recorder.error()
         if error:
@@ -81,21 +95,37 @@ class StatusMixin:
             self.stop_record()
             return
         elapsed = self.recorder.elapsed()
-        marks = f"{len(self.bookmarks)} bookmark(s)" if self.bookmarks else ""
+        mono = self.recorder.latest_mono(8.0)
 
+        env, marks = None, []
+        if self.live_zoom_btn.isChecked():
+            mins, maxs = self.recorder.envelope()
+            if len(mins) > 1:
+                env = (mins, maxs)
+                span = len(mins) * self.recorder.env_bucket / float(
+                    self.recorder.samplerate)
+                marks = [min(1.0, t / span) for t in self.bookmarks]
+        if env is None:
+            marks = self._live_marks(mono, elapsed)
+        window = "whole recording" if env is not None else "last 8 s"
+
+        # ---- paused state ----
         if self.recorder.paused:
             self.wave.set_live(
-                self.recorder.latest_mono(8.0),
+                mono,
                 f"PAUSED   {format_time(elapsed)}   (click Resume to continue)",
+                marks, env,
             )
-            tail = f"   {marks}" if marks else ""
-            self.statusBar().showMessage(f"Paused at {format_time(elapsed)}{tail}")
+            bk = f"   {len(self.bookmarks)} bookmark(s)" if self.bookmarks else ""
+            self.statusBar().showMessage(f"Paused at {format_time(elapsed)}{bk}")
             return
 
+        # ---- actively recording ----
         peak = self.recorder.peak()
         self.wave.set_live(
-            self.recorder.latest_mono(8.0),
-            f"RECORDING   {format_time(elapsed)}   (last 8 s)",
+            mono,
+            f"RECORDING   {format_time(elapsed)}   ({window})",
+            marks, env,
         )
         notes = []
         if peak < 1e-4 and elapsed > 3:
@@ -103,19 +133,18 @@ class StatusMixin:
         dropped = glitch_count()
         if dropped:
             notes.append(f"{dropped} dropout(s)")
-        if marks:
-            notes.append(marks)
+        if self.bookmarks:
+            notes.append(f"{len(self.bookmarks)} bookmark(s)")
         tail = (SEP + SEP.join(notes)) if notes else ""
         db = 20.0 * np.log10(max(peak, 1e-9))
         self.statusBar().showMessage(
-            f"Recording {format_time(elapsed)} to disk{SEP}input peak {db:5.1f} dBFS{tail}"
+            f"Recording {format_time(elapsed)} to disk{SEP}"
+            f"input peak {db:5.1f} dBFS{tail}"
         )
-
+        
     def _tick_playback(self):
         player = self.player
         if player.is_playing():
-            # Follow the player's *own* streamer, so the playhead keeps moving
-            # even after a setting change has invalidated anything cached.
             streamer = player.streamer
             if (streamer is not None and not self.wave.is_scrubbing()
                     and self._seek_target is None):

@@ -23,7 +23,23 @@ class PanelsMixin:
         self.stop_rec_btn.setMinimumWidth(80)                             
         self.stop_rec_btn.setEnabled(False)                                
         self.stop_rec_btn.setToolTip("Finish recording and load for editing")
-        self.stop_rec_btn.clicked.connect(self.stop_record)                
+        self.stop_rec_btn.clicked.connect(self.stop_record)   
+        self.mark_btn = QPushButton("Mark")
+        self.mark_btn.setMinimumWidth(60)
+        self.mark_btn.setEnabled(False)
+        self.mark_btn.setToolTip(
+            "Drop a bookmark at the current recording time   [Ctrl+B]")
+        self.mark_btn.clicked.connect(self.add_bookmark)  
+        self.live_zoom_btn = QPushButton("View: whole")
+        self.live_zoom_btn.setMinimumWidth(100)
+        self.live_zoom_btn.setCheckable(True)
+        self.live_zoom_btn.setChecked(True)
+        self.live_zoom_btn.setEnabled(False)
+        self.live_zoom_btn.setToolTip(
+            "While recording: show the whole recording so far, or only the last 8 s")
+        self.live_zoom_btn.toggled.connect(
+            lambda on: self.live_zoom_btn.setText(
+                "View: whole" if on else "View: last 8 s"))           
         self.source_btn = QPushButton("Source: none")
         self.source_btn.setMinimumWidth(230)
         self.source_btn.setToolTip("Click to choose what to record   [Ctrl+I]")
@@ -44,7 +60,9 @@ class PanelsMixin:
         self.mono_box.setToolTip("Halves disk and file size — ideal for podcasts.")
         row = QHBoxLayout()
         row.addWidget(self.rec_btn)
-        row.addWidget(self.stop_rec_btn)                                   # NEW
+        row.addWidget(self.stop_rec_btn)                                   
+        row.addWidget(self.mark_btn)
+        row.addWidget(self.live_zoom_btn)
         row.addWidget(self.source_btn)
         row.addWidget(sep())
         row.addWidget(QLabel("Name:"))
@@ -60,6 +78,7 @@ class PanelsMixin:
         self.wave.selectionChanged.connect(self.update_actions)
         self.wave.playheadMoved.connect(self.on_playhead_moved)
         self.wave.viewChanged.connect(self.sync_scrollbar)
+        self.wave.blockSelected.connect(self.on_block_selected)
         self.wave.context_actions = [
             self.act_mark_in, self.act_mark_out, None,
             self.act_delete, self.act_restore, None,

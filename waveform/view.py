@@ -20,6 +20,7 @@ class WaveformView(QWidget):
     selectionChanged = Signal()
     playheadMoved = Signal(float)
     viewChanged = Signal()
+    blockSelected = Signal(int)      # kept-piece index, or -1 for a deleted gap
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,8 +32,10 @@ class WaveformView(QWidget):
         self.timeline = None
         self.live_mono = None
         self.live_label = ""
+        self.live_marks = []
+        self.live_env = None
         self.fade_ms = 500.0
-        self.end_fade_s = 0.0 
+        self.end_fade_s = 0.0
         self.playhead = 0.0
         self.sel_a = self.sel_b = None
         self.view_start = 0.0
@@ -67,14 +70,18 @@ class WaveformView(QWidget):
     def set_end_fade(self, seconds):
         self.end_fade_s = float(seconds)
         self.update()
-        
-    def set_live(self, mono, label=""):
+
+    def set_live(self, mono, label="", marks=None, env=None):
         self.live_mono = mono
         self.live_label = label
+        self.live_marks = list(marks or [])
+        self.live_env = env
         self.update()
 
     def clear_live(self):
         self.live_mono = None
+        self.live_marks = []
+        self.live_env = None
         self.update()
 
     def duration(self):
@@ -256,7 +263,19 @@ class WaveformView(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, ev):
-        self.select_all()
+        """Select the block under the cursor: a kept piece or a deleted gap."""
+        if (self.duration() <= 0 or self.live_mono is not None
+                or ev.button() != Qt.LeftButton or not self.timeline):
+            return
+        x, y = ev.position().x(), ev.position().y()
+        if y < RULER_H:
+            return
+        block = self.timeline.block_at(self.x2t(x))
+        if block is None:
+            return
+        start, end, index = block
+        self.set_selection(start, end)
+        self.blockSelected.emit(-1 if index is None else index)
 
     def wheelEvent(self, ev):
         if self.duration() <= 0:
