@@ -32,6 +32,7 @@ class WaveformView(QWidget):
         self.live_mono = None
         self.live_label = ""
         self.fade_ms = 500.0
+        self.end_fade_s = 0.0 
         self.playhead = 0.0
         self.sel_a = self.sel_b = None
         self.view_start = 0.0
@@ -55,7 +56,6 @@ class WaveformView(QWidget):
         self.live_mono = None
         self.sel_a = self.sel_b = None
         self.playhead = 0.0
-        self.bookmarks = [] 
         self._peaks_key = None
         self.zoom_fit()
         self.selectionChanged.emit()
@@ -64,6 +64,10 @@ class WaveformView(QWidget):
         self.fade_ms = float(value)
         self.update()
 
+    def set_end_fade(self, seconds):
+        self.end_fade_s = float(seconds)
+        self.update()
+        
     def set_live(self, mono, label=""):
         self.live_mono = mono
         self.live_label = label
@@ -292,7 +296,7 @@ class WaveformView(QWidget):
             menu.addSeparator() if action is None else menu.addAction(action)
         menu.exec(ev.globalPos())
 
-        # True while the user is dragging the playhead on the ruler.
+    # True while the user is dragging the playhead on the ruler.
     def is_scrubbing(self):
         return self._drag == "playhead"
 
@@ -313,4 +317,8 @@ class WaveformView(QWidget):
         self._peaks_key = key
 
     def paintEvent(self, ev):
-        painter.paint(self, QPainter(self))
+        p = QPainter(self)
+        try:
+            painter.paint(self, p)
+        finally:
+            p.end()

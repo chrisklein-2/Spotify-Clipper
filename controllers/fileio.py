@@ -12,9 +12,9 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 from store import AudioStore                                      
 from editor import Keep, format_time                                  
 from processing import append_decoded, decode_to_raw                   
-from .constants import LOAD_FILTER, SESSION_DIR                        
-from .dialogs import JoinDialog                                       
-from .helpers import mbytes                                            
+from config import LOAD_FILTER, SESSION_DIR                        
+from ui.dialogs import JoinDialog                                       
+from utils import mbytes                                            
 
 class FileIOMixin:
 
@@ -33,6 +33,17 @@ class FileIOMixin:
         self.session_path = None
 
     def confirm_discard(self, verb="start a new recording"):
+        if self.recorder is not None:
+            answer = QMessageBox.warning(
+                self, "Recording in progress",
+                f"A recording is in progress and has NOT been saved.\n\n"
+                f"If you {verb} now, it will be discarded.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return False
+            self.abort_record()
+            return True
         if self.timeline.duration() <= 0:
             return True
         if self.unsaved:
@@ -54,11 +65,10 @@ class FileIOMixin:
         )
 
     def _show_store(self, store, name_hint=None, keeps=None):
-        self.timeline.set_store(store)
-        if keeps:
-            self.timeline._tidy(keeps)
+        self.timeline.set_store(store, keeps)
         self.wave.set_timeline(self.timeline)
         self.wave.set_fade_ms(self.cut_fade.value())
+        self.wave.set_end_fade(self.fade_out.value())
         self.wave.set_bookmarks(self.bookmarks)
         if name_hint:
             self.clip_name.setText(name_hint)
@@ -68,9 +78,8 @@ class FileIOMixin:
         self.statusBar().showMessage(
             f"{format_time(store.duration())} on disk "
             f"({mbytes(os.path.getsize(store.path))}), overview "
-            f"{mbytes(store.pyramid_bytes())} in RAM",
-            10000,
-        )
+            f"{mbytes(store.pyramid_bytes())} in RAM", 10000)
+        
 
     def load_file(self):
         if not self.confirm_discard("load a file"):
@@ -110,7 +119,7 @@ class FileIOMixin:
         if not path:
             return
         self.stop_playback()
-        old_keeps = [(k.start, k.end) for k in self.timeline.keeps]
+        old_keeps = [k.copy() for k in self.timeline.keeps]
         old_end = self.timeline.duration()
         raw = self.session_path
         rate = self.timeline.samplerate()
@@ -124,7 +133,7 @@ class FileIOMixin:
             return store
 
         def done(store):
-            keeps = [Keep(a, b) for a, b in old_keeps]
+            keeps = [k.copy() for k in old_keeps]
             keeps.append(Keep(old_end, store.duration()))
             self._show_store(store, keeps=keeps)
             self.statusBar().showMessage(
@@ -132,12 +141,19 @@ class FileIOMixin:
                 f"{format_time(store.duration())}",
                 10000,
             )
+        def failed(_msg):
+            def rebuild(report):
+                s = AudioStore(raw, rate, chans)
+                s.build_pyramid(report)
+                return s
+            self.run_task("Restoring", "Re-opening the recording...", rebuild,
+                          lambda s: self._show_store(
+                              s,keeps=[k.copy() for k in old_keeps]))
 
-        self.run_task(
-            "Appending",
-            f"Decoding and joining {os.path.basename(path)}...",
-            work, done,
-        )
+        self.run_task("Appending",
+                      f"Decoding and joining {os.path.basename(path)}...",
+                      work, done, failed)
+
 
     def join_files(self):
         if not self.confirm_discard("join files"):

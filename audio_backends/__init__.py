@@ -7,3 +7,5 @@ from .devices import (
 from .recorder import (
     Recorder, fit_channels, glitch_count, reset_glitches,
 )
+
+from .player import StreamPlayer

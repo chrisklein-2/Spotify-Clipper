@@ -8,10 +8,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QProgressBar, QPushButton, QTextBrowser, QVBoxLayout,
+    QCheckBox, QDoubleSpinBox, QGridLayout,
 )
 
 from audio_backends import default_device_index, list_capture_devices
-from .constants import HELP_HTML, LOAD_FILTER
+from config import LOAD_FILTER
+from .help_text import HELP_HTML
 
 
 class BusyDialog(QDialog):
@@ -175,3 +177,50 @@ class HelpDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(browser)
         lay.addWidget(close)
+
+
+class PieceFadeDialog(QDialog):
+    """Fade-in / fade-out for one kept piece; 'Default' follows Fade per cut."""
+
+    def __init__(self, keep, default_s, number, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Fades for piece {number + 1}")
+        self.setMinimumWidth(340)
+        limit = max(0.1, min(60.0, keep.length()))
+        grid = QGridLayout()
+        self._rows = []
+        for row, (label, value) in enumerate(
+                (("Fade in", keep.fade_in), ("Fade out", keep.fade_out))):
+            box = QCheckBox(f"Default ({default_s:g} s)")
+            box.setChecked(value is None)
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, limit)
+            spin.setDecimals(2)
+            spin.setSingleStep(0.5)
+            spin.setSuffix(" s")
+            spin.setValue(min(limit, default_s if value is None else value))
+            spin.setEnabled(value is not None)
+            box.toggled.connect(lambda on, s=spin: s.setEnabled(not on))
+            grid.addWidget(QLabel(label), row, 0)
+            grid.addWidget(spin, row, 1)
+            grid.addWidget(box, row, 2)
+            self._rows.append((box, spin))
+        ok = QPushButton("Apply")
+        ok.setObjectName("primary")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(
+            f"Piece length {keep.length():.1f} s. Fades are shrunk "
+            f"automatically if they would overlap."))
+        root.addLayout(grid)
+        root.addLayout(buttons)
+
+    def values(self):
+        return tuple(None if box.isChecked() else spin.value()
+                     for box, spin in self._rows)

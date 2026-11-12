@@ -6,27 +6,9 @@ import queue
 import threading
 
 import sounddevice as sd
-from PySide6.QtCore import QThread, Signal
-
-from .constants import PLAY_BLOCK
 
 
-class TaskThread(QThread):
-    """Runs one callable off the GUI thread with progress reporting."""
-
-    done = Signal(object)
-    failed = Signal(str)
-    progress = Signal(float)
-
-    def __init__(self, func, parent=None):
-        super().__init__(parent)
-        self.func = func
-
-    def run(self):
-        try:
-            self.done.emit(self.func(self.progress.emit))
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+PLAY_BLOCK = 8192
 
 
 class StreamPlayer:
@@ -78,10 +60,12 @@ class StreamPlayer:
         while not self.stop_flag.is_set():
             block = self.streamer.read(PLAY_BLOCK)
             if len(block) == 0:
-                try:
-                    self.queue.put(None, timeout=1.0)
-                except queue.Full:
-                    pass
+                while not self.stop_flag.is_set():
+                    try:
+                        self.queue.put(None, timeout=0.2)
+                        return
+                    except queue.Full:
+                        pass
                 return
             while not self.stop_flag.is_set():
                 try:

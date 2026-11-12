@@ -1,0 +1,8 @@
+PySide6>=6.6
+numpy>=1.24
+sounddevice>=0.4.6
+soundcard>=0.4.4        # 0.4.3 does not work with NumPy 2
+soundfile>=0.12
+
+# optional: QR code in "Send to phone"
+qrcode[pil]>=7.4

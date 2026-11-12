@@ -4,70 +4,16 @@ core/recording.py - RecordingMixin: source selection, record/pause/resume/stop.
 Mixed into MainWindow.
 """
 
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 from audio_backends import (
-    Recorder, default_device_index, glitch_count, list_capture_devices,
-    loopback_help, native_samplerate,
+    Recorder, glitch_count,
+    loopback_help
 )
-from .dialogs import SourceDialog
-
 
 class RecordingMixin:
 
-    # ---- source management (unchanged) -----------------------------------
-
-    def resolve_source(self):
-        devices = list_capture_devices()
-        chosen = None
-        for device in devices:
-            if device.label == self.source_label:
-                chosen = device
-                break
-        if chosen is None:
-            index = default_device_index(devices)
-            chosen = devices[index] if 0 <= index < len(devices) else None
-        self.apply_source(chosen, remember=False)
-
-    def apply_source(self, device, remember=True):
-        self.device = device
-        if device is None:
-            self.source_btn.setText("Source: none \u2014 click to choose")
-            self.source_btn.setToolTip(loopback_help())
-            self.statusBar().showMessage("No capture source.  " + loopback_help())
-            return
-        label = device.label
-        self.source_btn.setText(label if len(label) <= 32 else label[:31] + "\u2026")
-        self.source_btn.setToolTip(f"{label}\n\nClick to change.   [Ctrl+I]")
-        if remember:
-            self.source_label = label
-            self.settings.setValue("source_label", label)
-        rate = native_samplerate(device)
-        if rate is not None:
-            for i in range(self.sr_box.count()):
-                if self.sr_box.itemData(i) == rate:
-                    self.sr_box.setCurrentIndex(i)
-                    break
-        self.check_rate_match()
-
-    def choose_source(self):
-        if self.recorder is not None:
-            QMessageBox.information(self, "Recording", "Stop recording first.")
-            return
-        dialog = SourceDialog(self.source_label, self)
-        if dialog.exec() == QDialog.Accepted and dialog.chosen():
-            self.apply_source(dialog.chosen())
-
-    def check_rate_match(self, *_):
-        rate = native_samplerate(self.device)
-        want = self.sr_box.currentData()
-        if rate and want and rate != want:
-            self.statusBar().showMessage(
-                f"Note: the device runs at {rate} Hz but you chose {want} Hz. "
-                f"Windows will resample, which can add grit.",
-                12000,
-            )
-
+   
     # ---- recording lifecycle ---------------------------------------------
 
     def toggle_record(self):
@@ -143,12 +89,7 @@ class RecordingMixin:
             QMessageBox.critical(self, "Recording failed", str(exc))
             store = None
         self.recorder = None
-        self.rec_btn.setText("Record")
-        self.rec_btn.setChecked(False)
-        self.stop_rec_btn.setEnabled(False)
-        for widget in (self.sr_box, self.mono_box, self.source_btn):
-            widget.setEnabled(True)
-        self.wave.clear_live()
+        self._reset_record_ui()
         if store is None or store.frames() == 0:
             self.statusBar().showMessage("Nothing captured — wrong source?", 8000)
             return
@@ -173,8 +114,24 @@ class RecordingMixin:
             lambda ready: self._show_store(ready),
         )
 
-    def start_new_recording(self):
-        """File menu action: stop any current recording, confirm, start fresh."""
-        if self.recorder is not None:
-            self.stop_record()
-        self.start_record()
+    def _reset_record_ui(self):
+        self.rec_btn.setText("Record")
+        self.rec_btn.setChecked(False)
+        self.stop_rec_btn.setEnabled(False)
+        for widget in (self.sr_box, self.mono_box, self.source_btn):
+            widget.setEnabled(True)
+        self.wave.clear_live()
+
+    def abort_record(self):
+        """Stop capturing and throw the recording away."""
+        rec, self.recorder = self.recorder, None
+        if rec is not None:
+            try:
+                store = rec.stop()
+                store.close()              # release the file so it can be deleted
+            except Exception:
+                pass
+        self._reset_record_ui()
+        self.drop_session()
+        self.bookmarks.clear()
+        self.update_actions()

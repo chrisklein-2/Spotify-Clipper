@@ -33,7 +33,7 @@ def _catch_glitch(message, category, filename, lineno, file=None, line=None):
 
 
 warnings.showwarning = _catch_glitch
-
+warnings.filterwarnings("always", message=".*discontinuity.*")
 
 def glitch_count():
     return _glitches
@@ -60,7 +60,6 @@ def fit_channels(block, channels):
 
 # ── Recorder ────────────────────────────────────────────────────
 class Recorder:
-    # ... entire class body unchanged ...
 
     def __init__(self, device, path, samplerate=DEFAULT_SR, channels=2):
         self.device = device
@@ -88,13 +87,7 @@ class Recorder:
         self._stop.clear()
         self._wr_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self._wr_thread.start()
-        if self.device.backend == "soundcard":
-            if sc is None:
-                raise RuntimeError("soundcard library is not available")
-            self._cap_thread = threading.Thread(target=self._sc_loop, daemon=True)
-            self._cap_thread.start()
-        else:
-            self._start_sd()
+        self._start_capture()
 
     # stop capture but keep the file open for resuming.
     def pause(self):
@@ -130,6 +123,9 @@ class Recorder:
         self._queue = queue.Queue(maxsize=512)
         self._wr_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self._wr_thread.start()
+        self._start_capture()
+
+    def _start_capture(self):
         if self.device.backend == "soundcard":
             if sc is None:
                 raise RuntimeError("soundcard library is not available")
@@ -137,7 +133,6 @@ class Recorder:
             self._cap_thread.start()
         else:
             self._start_sd()
-
 
     def _writer_loop(self):
         while True:
@@ -247,7 +242,10 @@ class Recorder:
             if self._cap_thread is not None:
                 self._cap_thread.join(timeout=3.0)
                 self._cap_thread = None
-            self._queue.put(None)
+            try:
+                self._queue.put(None, timeout=1.0)
+            except queue.Full:
+                pass
             if self._wr_thread is not None:
                 self._wr_thread.join(timeout=10.0)
                 self._wr_thread = None

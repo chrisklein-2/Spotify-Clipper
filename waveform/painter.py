@@ -10,6 +10,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QPolygonF
 
+from editor.fades import cap_fades
 from editor import format_time
 from theme import (COL_BG, COL_DEL_BG, COL_FADE, COL_MARK, COL_PLAYHEAD,
                    COL_RULER, COL_RULER_LINE, COL_SEL, COL_SEL_EDGE, COL_TEXT,
@@ -100,6 +101,7 @@ def paint(view, p):
         p.drawLine(int(view.t2x(a)), int(mid), int(view.t2x(b)), int(mid))
 
     _paint_fades(view, p, mid, scale)
+    _paint_end_fade(view, p, mid, scale)
     _paint_selection(view, p, bt, h)
     _paint_ruler(view, p, w)
     _paint_bookmarks(view, p) 
@@ -149,24 +151,48 @@ def _paint_flag(view, p, x, bt, label, right):
 
 # Draw the fade in / fade out ramp at each kept piece edge.
 def _paint_fades(view, p, mid, scale):
-    if view.fade_ms <= 0 or not view.timeline:
+    tl = view.timeline
+    if not tl or not tl.keeps or view.span() <= 0:
         return
-    fade_px = (view.fade_ms / 1000.0) / view.span() * view.width()
-    if fade_px < 1.5:
-        return
+    px_per_s = view.width() / view.span()
+    default = view.fade_ms / 1000.0
     top, bot = mid - scale, mid + scale
+    keeps = tl.keeps
+    last = len(keeps) - 1
+    end_s = min(view.end_fade_s, tl.kept_duration())
     p.setPen(QPen(COL_FADE, 2))
-    for keep in view.timeline.keeps:
+
+    end_wins = False
+    for i, keep in enumerate(keeps):
         x1, x2 = view.t2x(keep.start), view.t2x(keep.end)
+        fin = default if keep.fade_in is None else keep.fade_in
+        fout = default if keep.fade_out is None else keep.fade_out
+        fin, fout = cap_fades(fin, fout, keep.length())
+        if i == last and end_s > fout:
+            end_wins = True            # the end fade replaces this wedge
+            fout = 0.0
         if x2 < -20 or x1 > view.width() + 20:
             continue
-        f = min(fade_px, (x2 - x1) / 2.0)
-        if f < 1.5:
-            continue
-        p.drawLine(int(x1), int(mid), int(x1 + f), int(top))
-        p.drawLine(int(x1), int(mid), int(x1 + f), int(bot))
-        p.drawLine(int(x2 - f), int(top), int(x2), int(mid))
-        p.drawLine(int(x2 - f), int(bot), int(x2), int(mid))
+        fi_px, fo_px = fin * px_per_s, fout * px_per_s
+        if fi_px >= 1.5:
+            p.drawLine(int(x1), int(mid), int(x1 + fi_px), int(top))
+            p.drawLine(int(x1), int(mid), int(x1 + fi_px), int(bot))
+        if fo_px >= 1.5:
+            p.drawLine(int(x2 - fo_px), int(top), int(x2), int(mid))
+            p.drawLine(int(x2 - fo_px), int(bot), int(x2), int(mid))
+
+    if end_wins:
+        acc = 0.0                       # output seconds already covered
+        for keep in reversed(keeps):
+            if acc >= end_s:
+                break
+            use = min(end_s - acc, keep.length())
+            g_end, g_start = acc / end_s, (acc + use) / end_s
+            xe, xs = view.t2x(keep.end), view.t2x(keep.end - use)
+            for edge in (top, bot):
+                p.drawLine(int(xs), int(mid + (edge - mid) * g_start),
+                           int(xe), int(mid + (edge - mid) * g_end))
+            acc += use
 
 
 # Draw ruler tick marks and time labels.
@@ -210,3 +236,21 @@ def _paint_bookmarks(view, p):
         if -r <= x <= view.width() + r:
             p.drawEllipse(x - r, y_dot - r, r * 2, r * 2)
             p.drawLine(x, RULER_H, x, RULER_H + 8)
+
+def _paint_end_fade(view, p, mid, scale):
+    if view.end_fade_s <= 0 or not view.timeline or not view.timeline.keeps:
+        return
+    fade = min(view.end_fade_s, view.timeline.kept_duration())
+    top, bot = mid - scale, mid + scale
+    p.setPen(QPen(COL_FADE, 2, Qt.DashLine))
+    acc = 0.0                                    # output seconds already covered
+    for keep in reversed(view.timeline.keeps):
+        if acc >= fade:
+            break
+        use = min(fade - acc, keep.length())
+        g_end, g_start = acc / fade, (acc + use) / fade
+        x_end, x_start = view.t2x(keep.end), view.t2x(keep.end - use)
+        for edge in (top, bot):
+            p.drawLine(int(x_start), int(mid + (edge - mid) * g_start),
+                       int(x_end), int(mid + (edge - mid) * g_end))
+        acc += use

@@ -1,24 +1,7 @@
-"""
-constants.py - paths, limits, filter strings, help text.
-"""
-
-import os
-
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EXPORT_DIR = os.path.join(APP_DIR, "exports")
-DEFAULT_FINALS_DIR = os.path.join(APP_DIR, "finals")
-SESSION_DIR = os.path.join(APP_DIR, "session")
-PLAY_BLOCK = 8192
-ORPHAN_AGE = 24 * 3600
-
-LOAD_FILTER = (
-    "Audio / video (*.wav *.flac *.ogg *.aiff *.mp3 *.m4a *.mp4 *.aac "
-    "*.opus *.webm *.mkv *.mov *.wma);;All files (*)"
-)
 
 HELP_HTML = """
 <h3>1 &nbsp;Capture</h3>
-<p><b>Source</b> menu &#8594; pick a <b>LOOPBACK</b> device. Press <b>Record</b>, play
+<p><b>Source</b> button &#8594; pick a <b>LOOPBACK</b> device. Press <b>Record</b>, play
 the episode, press <b>Stop</b>. Audio goes straight to disk, so a 2 hour podcast costs
 about 15 MB of RAM. For speech tick <b>Mono</b> and pick <b>32 000 Hz</b>.</p>
 
