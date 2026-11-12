@@ -1,5 +1,5 @@
 """
-playback.py - StreamPlayer (queue-buffered audio output) and TaskThread.
+player.py - StreamPlayer (queue-buffered audio output)
 """
 
 import queue

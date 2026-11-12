@@ -1,4 +1,4 @@
-"""core/folders.py - FoldersMixin: export/finals folders, move, send to phone."""
+"""controllers/folders.py - FoldersMixin: export/finals folders, move, send to phone."""
 import os
 import shutil
 

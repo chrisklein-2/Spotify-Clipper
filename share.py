@@ -4,7 +4,6 @@ share.py - serve a folder of clips to a phone over Wi-Fi.
 A throwaway HTTP server serves every audio file in one folder behind a random
 token URL. The QR code points to an index page; each file offers:
 
-  * Save to VLC  -> vlc-x-callback://x-callback-url/download?url=...
   * Download     -> the file with Content-Disposition: attachment.
 
 The folder is re-scanned on every page load, so exporting another clip while

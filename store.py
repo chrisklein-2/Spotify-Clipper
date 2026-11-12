@@ -1,5 +1,5 @@
 """
-audiostore.py - disk-backed audio plus a peak pyramid.
+store.py - disk-backed audio plus a peak pyramid.
 
 Why this exists: holding a 2 hour recording as float32 in RAM costs ~2.8 GB, and
 drawing it by scanning every sample costs ~400 ms per repaint. Both are avoidable.

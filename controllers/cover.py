@@ -1,4 +1,4 @@
-"""core/cover.py - CoverMixin: cover-art selection."""
+"""controllers/cover.py - CoverMixin: cover-art selection."""
 import os
 
 from PySide6.QtCore import Qt

@@ -1,4 +1,4 @@
-"""core/transport.py - TransportMixin: play / pause / seek / raw / test tone."""
+"""controllers/transport.py - TransportMixin: play / pause / seek / raw / test tone."""
 import sounddevice as sd
 
 from editor import ClipStreamer, Piece
